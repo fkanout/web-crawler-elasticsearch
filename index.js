@@ -2,12 +2,10 @@
 
 const [, , ...args] = process.argv
 const Crawler = require('crawler')
-const request = require('axios')
 const chalk = require('chalk')
 const elasticsearch = require('elasticsearch')
 const excludedElements = ['body', 'div', 'ui', 'script', 'style', 'head', 'html']
 const portals = []
-let created = 0
 let elasticInstance = 'http://127.0.0.1:9200'
 
 args.forEach(arg => {
@@ -24,7 +22,7 @@ args.forEach(arg => {
       const portalUrl = new URL(argAsArray[0] + ':' + argAsArray[1])
       portals.push({
         url: portalUrl.origin,
-        name: argAsArray[2] || portalUrl.host
+        name: argAsArray[2].toLowerCase() || portalUrl.host
       })
     } catch (error) {
       console.log(error)
@@ -54,12 +52,10 @@ const c = new Crawler({
     if (error) {
       console.log(error)
     } else {
-      console.log(created)
 
       // $ is Cheerio by default
       // a lean implementation of core jQuery designed specifically for the server
     }
-    console.log(created)
 
     done()
   }
@@ -113,7 +109,6 @@ const core = async (url, name) => {
           elementToAdd.push(prefixIndex, indexObject)
         }
       })
-
       try {
         const { items } = await client.bulk({
           body: elementToAdd
