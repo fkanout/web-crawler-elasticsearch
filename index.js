@@ -1,42 +1,93 @@
-var Crawler = require('crawler')
-const request = require('axios')
-const uri = 'https://developer.axway.com'
-var c = new Crawler({
-  maxConnections: 40,
+#!/usr/bin/env node
+
+const [, , ...args] = process.argv
+const Crawler = require('crawler')
+const chalk = require('chalk')
+const elasticsearch = require('elasticsearch')
+const excludedElements = ['body', 'div', 'ui', 'script', 'style', 'head', 'html']
+const portals = []
+let elasticInstance = 'http://127.0.0.1:9200'
+
+args.forEach(arg => {
+  if (arg === '-e' || arg === '--elastic') {
+    const elasticArgIndex = args.indexOf(arg)
+    elasticInstance = args[elasticArgIndex + 1]
+  } else {
+    try {
+      const currentArgIndex = args.indexOf(arg)
+      if (args[currentArgIndex - 1] === '-e' || args[currentArgIndex - 1] === '--elastic') {
+        return
+      }
+      const argAsArray = arg.split(':')
+      const portalUrl = new URL(argAsArray[0] + ':' + argAsArray[1])
+      portals.push({
+        url: portalUrl.origin,
+        name: argAsArray[2].toLowerCase() || portalUrl.host
+      })
+    } catch (error) {
+      console.log(error)
+    }
+  }
+})
+
+const client = new elasticsearch.Client({
+  host: elasticInstance
+})
+
+client.ping({
+  // ping usually has a 3000ms timeout
+  requestTimeout: 1000
+}, function (error) {
+  if (error) {
+    console.trace('elasticsearch cluster is down!')
+  } else {
+    console.log('All is well')
+  }
+})
+
+const c = new Crawler({
+  maxConnections: 1,
   // This will be called for each crawled page
   callback: function (error, res, done) {
     if (error) {
       console.log(error)
     } else {
+
       // $ is Cheerio by default
       // a lean implementation of core jQuery designed specifically for the server
     }
+
     done()
   }
 })
 
-// Queue URLs with custom callbacks & parameters
-c.queue([
-  {
-    uri,
-    // The global callback won't be called
-    callback: function (error, res, done) {
+const core = async (url, name) => {
+  if (await client.indices.exists({ index: name })) {
+    await client.indices.delete({ index: name })
+  }
+  c.queue([{
+    url,
+    callback: async function (error, res, done) {
       if (error) {
         return console.log(error)
       }
       const $ = res.$
-      let bodyContent
+      const elementToAdd = []
       $('*').each((i, elem) => {
-        if (elem.name === 'body') {
-          const rawBodyContent = $(elem)
-            .text()
-            .trim()
-          bodyContent = rawBodyContent.replace(/\s+/g, ' ')
-          const indexObject = {
-            href: uri,
-            text: bodyContent
+        if (!excludedElements.includes(elem.name)) {
+          const rawText = $(elem).text().trim()
+          const text = rawText.replace(/\s+/g, ' ')
+          if (!text) {
+            return
           }
-          index(indexObject)
+          const prefixIndex = {
+            index: { _index: name, _type: '_doc' }
+          }
+          const indexObject = {
+            href: url,
+            text
+          }
+          elementToAdd.push(prefixIndex, indexObject)
         }
         if (elem.name === 'a') {
           const href = $(elem).attr('href')
@@ -46,21 +97,34 @@ c.queue([
             return
             // TODO: maybe a link with the same domain
           }
+          const prefixIndex = {
+            index: { _index: name, _type: '_doc' }
+          }
+
           const indexObject = {
             href,
             text: title
+
           }
-          index(indexObject)
+          elementToAdd.push(prefixIndex, indexObject)
         }
       })
+      try {
+        const { items } = await client.bulk({
+          body: elementToAdd
+        })
+        console.log(`From ${chalk.red(url)} indexed ${chalk.yellow(items.length)} name ${chalk.green(name)}`)
+      } catch (error) {
+        console.log(error)
+      }
       done()
     }
-  }
-])
-
-const index = (data) => {
-  request
-    .post('http://127.0.0.1:9200/developer/_doc', data)
-    .then(res => console.log(res))
-    .catch(error => console.log(error))
+  }])
 }
+portals.forEach(({ url, name }) => {
+  try {
+    core(url, name)
+  } catch (error) {
+    console.log(error)
+  }
+})
