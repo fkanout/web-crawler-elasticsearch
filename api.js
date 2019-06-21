@@ -14,13 +14,25 @@ router.delete('/index/:indexName', async (ctx, next) => {
 })
 
 router.get('/doc', async (ctx, next) => {
-  ctx.body = await client.search({
-    analyzeWildcard: true,
-    size: 50,
-    expandWildcards: 'all',
-    // index: 'blog',
-    q: ctx.query.q
+  const indices = ctx.query.indices.split(',')
+  const reqToResolve = indices.map(index =>
+    client.search({
+      analyzeWildcard: true,
+      size: 10,
+      expandWildcards: 'all',
+      index: index,
+      q: ctx.query.q
+    }))
+
+  const res = await Promise.all(reqToResolve)
+
+  ctx.body = res.map(ele => {
+    const hashName = ele.hits.hits[0]._index
+    return ({
+      [hashName]: ele.hits.hits
+    })
   })
+  await next()
 })
 
 app.use(router.routes())
