@@ -1,6 +1,7 @@
 const Koa = require('koa')
 const Router = require('koa-router')
 const elasticsearch = require('elasticsearch')
+const cors = require('@koa/cors')
 const app = new Koa()
 const router = new Router()
 const elasticInstance = 'http://127.0.0.1:9200'
@@ -17,23 +18,35 @@ router.get('/doc', async (ctx, next) => {
   const indices = ctx.query.indices.split(',')
   const reqToResolve = indices.map(index =>
     client.search({
-      analyzeWildcard: true,
       size: 10,
-      expandWildcards: 'all',
       index: index,
-      q: ctx.query.q
+      body: {
+        'query': {
+          'wildcard': {
+            'text': {
+              'value': `*${ctx.query.q}*`
+            }
+          }
+        }
+
+      }
     }))
 
   const res = await Promise.all(reqToResolve)
 
   ctx.body = res.map(ele => {
-    const hashName = ele.hits.hits[0]._index
-    return ({
-      [hashName]: ele.hits.hits
-    })
+    if (ele.hits && ele.hits.hits.length > 0) {
+      const hashName = ele.hits.hits[0]._index
+      return ({
+        [hashName]: ele.hits.hits
+      })
+    } else {
+      return []
+    }
   })
   await next()
 })
+app.use(cors())
 
 app.use(router.routes())
 
